@@ -1,0 +1,4 @@
+SUPABASE_URL = "https://hbifztnaxnfszprzurdz.supabase.co"
+SUPABASE_KEY = "sb_publishable_FCy7_8jxCarF0dPnIJT8fw_bg9ABxx1"
+
+https://agenda-haylex.streamlit.app/
