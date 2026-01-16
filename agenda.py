@@ -2,20 +2,48 @@
 import streamlit as st
 import sqlite3
 import hashlib
+import os
+import shutil
+from datetime import datetime
 
 # === Funciones de base de datos ===
 def get_db_connection():
     conn = sqlite3.connect('haylex_data.db')
-    conn.row_factory = sqlite3.Row  # Permite acceder por nombre de columna
+    conn.row_factory = sqlite3.Row
     return conn
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
+# === Función de backup automático ===
+def backup_database():
+    """Crea una copia de seguridad de la base de datos con marca de tiempo."""
+    if not os.path.exists("backups"):
+        os.makedirs("backups")
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"backups/haylex_data_{timestamp}.db"
+    
+    try:
+        shutil.copy2("haylex_data.db", backup_path)
+        cleanup_old_backups()
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo crear backup: {str(e)}")
+
+def cleanup_old_backups(max_backups=5):
+    """Mantiene solo los N backups más recientes."""
+    if not os.path.exists("backups"):
+        return
+    backups = sorted(
+        [f for f in os.listdir("backups") if f.startswith("haylex_data_")],
+        reverse=True
+    )
+    for old_backup in backups[max_backups:]:
+        os.remove(os.path.join("backups", old_backup))
+
 # === Inicialización de la base de datos ===
 def init_db():
     conn = get_db_connection()
-    # Crear tabla si no existe
     conn.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,25 +52,22 @@ def init_db():
             rol TEXT DEFAULT 'usuario'
         )
     ''')
-    # Asegurar que GERENCIA exista como admin (solo si no existe)
     try:
         conn.execute('''
             INSERT INTO usuarios (usuario, password, rol)
             VALUES (?, ?, ?)
         ''', ('GERENCIA', hash_password('GERENCIA'), 'admin'))
     except sqlite3.IntegrityError:
-        # Ya existe, no hacer nada
         pass
     conn.commit()
     conn.close()
 
-# Ejecutar inicialización al cargar
 init_db()
 
-# === Interfaz de Streamlit ===
+# === Configuración de Streamlit ===
 st.set_page_config(page_title="Sistema HAYLEX", layout="wide")
 
-# Sidebar: Login
+# === Login ===
 if 'user' not in st.session_state:
     st.sidebar.title("🔒 Iniciar Sesión")
     username = st.sidebar.text_input("Usuario")
@@ -60,6 +85,11 @@ if 'user' not in st.session_state:
             if user:
                 st.session_state.user = dict(user)
                 st.success(f"✅ Bienvenido, {user['usuario']}")
+                
+                # Backup automático al iniciar sesión (solo admin)
+                if user['rol'] == 'admin':
+                    backup_database()
+                
                 st.rerun()
             else:
                 st.error("❌ Usuario o contraseña incorrectos")
@@ -67,10 +97,8 @@ if 'user' not in st.session_state:
             st.warning("⚠️ Ingresa usuario y contraseña")
     st.stop()
 
-# Si ya hay sesión activa
+# === Panel de usuario ===
 user = st.session_state.user
-
-# Sidebar: Información y cierre de sesión
 st.sidebar.title("👤 Panel de Control")
 st.sidebar.write(f"**Usuario:** {user['usuario']}")
 st.sidebar.write(f"**Rol:** {user['rol'].capitalize()}")
@@ -81,7 +109,6 @@ if st.sidebar.button("🚪 Salir del Sistema"):
 # === Contenido principal ===
 st.title("📅 Sistema de Gestión HAYLEX")
 
-# Menú de navegación (puedes expandirlo después)
 menu = st.sidebar.radio("Menú", ["Inicio", "Control de Usuarios", "Evaluaciones", "Clientes", "Mensajes"])
 
 if menu == "Inicio":
@@ -95,7 +122,6 @@ elif menu == "Control de Usuarios":
 
     st.header("👥 Control de Usuarios")
 
-    # Formulario para crear usuario
     with st.expander("➕ Crear Nuevo Usuario"):
         new_user = st.text_input("Nombre de usuario", key="new_user")
         new_pass = st.text_input("Contraseña", type="password", key="new_pass")
@@ -119,7 +145,6 @@ elif menu == "Control de Usuarios":
             else:
                 st.warning("⚠️ Completa todos los campos")
 
-    # Listar usuarios
     st.subheader("Usuarios Registrados")
     conn = get_db_connection()
     users = conn.execute("SELECT * FROM usuarios ORDER BY rol DESC, usuario").fetchall()
